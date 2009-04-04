@@ -1,0 +1,17 @@
+__all__ = ('upgrade', 'downgrade', 'number')
+
+number = %(number)d
+
+upgrade_sql = '''
+%(upgrade)s
+'''
+
+downgrade_sql = '''
+%(upgrade)s
+'''
+
+def upgrade(cursor):
+    cursor.execute(upgrade_sql)
+
+def downgrade(cursor):
+    cursor.execute(downgrade_sql)

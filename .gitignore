@@ -1,0 +1,10 @@
+*.bat
+*.orig
+*.pyc
+*.sh
+*.sql
+.project
+.pydevproject
+.settings
+commit.txt
+rs/revstore/*.py

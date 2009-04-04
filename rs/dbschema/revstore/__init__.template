@@ -1,0 +1,5 @@
+revision_list = (
+    %(revision_list)s
+)
+
+current = %(current)d
