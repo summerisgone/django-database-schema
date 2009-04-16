@@ -1,146 +1,181 @@
 # -*- coding: utf-8 -*-
 
-from django.conf import settings
-from django.db import models, connection, DatabaseError
-from os.path import join, dirname
-from datetime import datetime
+import os
+import re
 import sys
+from datetime import datetime
+from os.path import join, dirname, abspath, exists, split
 
-# revision filename template:
+from django.core.management.sql import sql_all, sql_delete
+from django.core.management.color import no_style
+from django.conf import settings
+from django.db import models
+from django.utils.translation import ugettext_lazy as _
+
 REVSTORE = 'revstore'
-REVISIOIN_FILENAME = 'revision_' + datetime.now().strftime('%Y_%m_%d_%H_%M') + '.py'
+REVSTORE_DIR = join(dirname(abspath(__file__)), REVSTORE)
 
 class Repository(models.Model):
     '''
         Class representing database schema repository
     '''
-    version = models.IntegerField(verbose_name='Database schema version')
-    revisions = []
-    path = join(settings.PROJECT_DIR, 'schema')
+    class Meta:
+        db_table = 'dbschema_repository'
+        ordering = ['-applied']
 
-    def __init__(self, *args, **kwrgs):
-        # set schema path, or by default use schema directory
-        self.revstore = self._import_revisions()
-        # get revision list from __init__, useful for merges
-        for revision in self.revstore.revision_list:
-            self.revisions.append(getattr(self.revstore, revision))
-        
-        kwrgs['id'] = 1  # only one record
-        models.Model.__init__(self, *args, **kwrgs)
+    revno = models.IntegerField(verbose_name=_('revision number'), default=0)
+    applied = models.DateTimeField(verbose_name=_('applied'), auto_now_add=True)
+    
+    @classmethod
+    def set_revno(cls, revno):
+        '''
+            Sets given revision number in database
+        '''
+        try:
+            cls.objects.create(revno=revno)
+        except StandardError, error:
+            # table "dbschema_repository" does not exist
+            if revno != 0:
+                raise error
 
-    def _import_revisions(self):
+    @classmethod
+    def get_revno(cls):
         '''
-            Do import revisions from self.revision_list
+            Gets revision number from database
         '''
-        revstore = __import__('revstore', globals(), locals())
-        modules = __import__('revstore', globals(), locals(),
-                             revstore.revision_list)
-        return modules
+        revisions = cls.objects.all()
+        try:
+            count = revisions.count()
+        except StandardError:
+            # table "dbschema_repository" does not exist
+            return 0
+        if count == 0:
+            cls.set_revno(0)
+            return 0
+        return revisions[0].revno
 
-    def _write_init_file(self):
+    @classmethod
+    def get_revisions(cls):
         '''
-            Update content in __init__.py file
+            Gets revision list
         '''
-        init_file = open(join(self.path, 'revstore/__init__.py'), 'w')
+        try:
+            module = __import__(REVSTORE, globals(), locals(), [''])
+            return module.revisions
+        except ImportError:
+            return []
 
-        template_file = open(join(self.path, 'revstore/__init__.template'), 'r')
+    @classmethod
+    def set_revisions(cls, revisions):
+        '''
+            Update revision list
+        '''
+        template_file = open(join(REVSTORE_DIR, '__init__.template'), 'r')
         template = template_file.read()
 
-        init_file.write(template % {'revision_list': self.revstore.revision_list,
-                                    'current': self.revstore.current})
+        init_file = open(join(REVSTORE_DIR, '__init__.py'), 'w')
+        init_file.write(template % (
+            '[\n%s]' % ',\n'.join([repr(revision) 
+                for revision in revisions] + [''])))
+        
+    @classmethod
+    def count(cls):
+        return len(cls.get_revisions())
 
-    def _set_revno(self, revno):
+    @classmethod
+    def execute(cls, revision, upgrade=True):
+        module = __import__('%s.%s' % (REVSTORE, revision), globals(), locals(), 
+            ['upgrade', 'downgrade'])
+        if upgrade:
+            return module.upgrade()
+        else:
+            return module.downgrade()
+    
+    @classmethod
+    def apply(cls, revno):
         '''
-            Set given revision number in database
+            Applies schema version to database
         '''
-        self.version = revno
-        self.save()
+        revisions = cls.get_revisions()
+        while True:
+            current = cls.get_revno()
+            if revno == current:
+                break
+            if revno > current:
+                action = 'Upgrade'
+                next = current + 1
+                revision = revisions[current]
+            else:
+                action = 'Dowgrade'
+                next = current - 1
+                revision = revisions[next]
+            print '%s: %d -> %d -' % (action, current, next),
+            result = cls.execute(revision, revno > current)
+            if result is None:
+                cls.set_revno(next)
+                print 'OK.'
+            else:
+                print 'Fail.'
+                print result
+                break
 
-    def is_uptodate(self):
-        return self.version == self.revstore.current
-
-    def apply(self, revno):
-        '''
-            Applies schema version to database if exists
-        '''
-        cursor = connection.cursor()
-
-        if revno > self.revstore.current:
-        # uprgade database 
-            upgrade_list = self.revisions[self.revstore.current:revno]
-            print 'upgrade: ', upgrade_list
-            
-            for revision in upgrade_list:
-                try:
-                    print 'Upgrade to revision: ', revision.number
-                    revision.upgrade(cursor)
-                    connection.connection.commit()
-                    self.forcerevno(revno)
-                except Exception, e:
-                    print 'Database Error: %s. Rollback' % e
-                    connection.connection.rollback()
-
-        # downgrade database 
-        elif revno < self.revstore.current:
-            downgrade_list = self.revisions[revno:self.revstore.current]
-            downgrade_list.reverse()
-            print 'downgrade: ', downgrade_list
-            
-            for revision in downgrade_list:
-                try:
-                    print 'Downgrade from revision ', revision.number
-                    revision.downgrade(cursor)
-                    connection.connection.commit()
-                    self.forcerevno(revno)
-                except Exception, e:
-                    print 'Database Error: %s. Rollback' % e
-                    connection.connection.rollback()
-
-    def add(self):
+    @classmethod
+    def add(cls, upgrade_sql='', downgrade_sql=''):
         '''
             Adds template for next revision and adds it into __init__.py
         '''
-        template_file = open(join(self.path, 'revstore/revision.template'), 'r')
-        template = template_file.read()
+        template_file = open(join(REVSTORE_DIR, 'revision.template'), 'r')
+        template = template_file.read().encode('utf-8')
 
-        upgrade = '-- upgrade query here'
-        downgrade = '-- downgrade query here'
-
-        new_revision_number = len(self.revstore.revision_list) + 1
-        new_revision_filename = join(REVSTORE, REVISIOIN_FILENAME)
-        new_revision = open(join(self.path, new_revision_filename), 'w')
-        new_revision.write(template % {'number': new_revision_number,
-                                       'upgrade': upgrade,
-                                       'downgrade': downgrade,
-                                       })
-        # update changes in current revstore.revision_list
-        self.revstore.revision_list.append(REVISIOIN_FILENAME[:-3])
-        # import newly added revision as module
-        new_revision_module = __import__(new_revision_filename[:-3],
-                                         globals(), locals())
-        # add it to revstore and to repository
-        setattr(self.revstore,
-                REVISIOIN_FILENAME[:-3],
-                new_revision_module
-                )
-        self.revisions.append(new_revision_module)
-        # write changes to disk
-        self._write_init_file()
-        print join(self.path, new_revision_filename), ' revision added, change it'
-
-    def forcerevno(self, revno):
-        '''
-            Force database revision number
-        '''
-        self._set_revno(revno)
-        self.revstore.current = revno
-        self._write_init_file()
-
-    def reset(self):
+        userid = 'unknown'
+        for var in ['USER', 'USERNAME']:
+            userid = os.environ.get(var, userid)
+        userid = re.sub(r'[^A-Za-z0-9]', '_', userid)
+        iteration = 0
+        while True:
+            if iteration:
+                postfix = '_%d' % (iteration + 1)
+            else:
+                postfix = '' 
+            revision = 'revision_%s_%s%s' % (
+                datetime.now().strftime('%Y_%m_%d__%H_%M'), userid, postfix)
+            
+            revision_name = join(REVSTORE_DIR, '%s.py' % revision)
+            if not exists(revision_name):
+                revision_file = open(revision_name, 'w')
+                revision_file.write(template % (upgrade_sql, downgrade_sql))
+                break
+            iteration = iteration + 1
+        
+        revisions = cls.get_revisions()
+        revisions.append(revision)
+        cls.set_revisions(revisions)
+    
+        print 'New revision was added, change it:\n%s' % revision_name
+        
+    @classmethod
+    def init(cls, application_names):
+        applications = [models.get_app(application_name) 
+            for application_name in application_names]  
+        upgrade = u''.join([
+            u'\n'.join(sql_all(application, no_style()) + ['']).encode('utf-8')
+                for application in applications])
+        downgrade = u''.join([u'\n'.join(sql_delete(application, no_style()) + ['']).encode('utf-8')
+                for application in applications])
+        cls.add(upgrade, downgrade)
+        
+    @classmethod
+    def initall(cls):
+        cls.init([application.__name__.split('.')[-2] 
+            for application in models.get_apps()])
+    
+    @classmethod
+    def reset(cls):
         '''
             Reset revstore configuration
         '''
-        self._set_revno(0)
-        self.revstore.current = 0
-        self.revstore.revision_list = []
-        self._write_init_file()
+        cls.set_revisions([])
+        cls.set_revno(0)
+
+    def __unicode__(self):
+        return self.version

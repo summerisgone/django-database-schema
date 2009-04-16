@@ -1,17 +1,48 @@
-__all__ = ('upgrade', 'downgrade', 'number')
+# -*- coding: utf-8 -*-
 
-number = %(number)d
+from django.conf import settings
+from django.db import connection, transaction
 
-upgrade_sql = '''
-%(upgrade)s
-'''
+@transaction.autocommit
+def upgrade():
+    # prepare here
+    # prepare end
+    transaction.commit()
+    try:
+        connection.cursor().execute('''
+-- upgrade query here
 
-downgrade_sql = '''
-%(upgrade)s
-'''
+%s
+-- upgrade query end
+''')
+        transaction.commit()
+    except StandardError, error:
+        transaction.rollback()
+        # fail here
+        # fail end
+        return error
+    # post processing here
+    # post processing end
+    return None
 
-def upgrade(cursor):
-    cursor.execute(upgrade_sql)
+@transaction.autocommit
+def downgrade():
+    # prepare here
+    # prepare end
+    transaction.commit()
+    try:
+        connection.cursor().execute('''
+-- downgrade query here
 
-def downgrade(cursor):
-    cursor.execute(downgrade_sql)
+%s
+-- downgrade query end
+''')
+        transaction.commit()
+    except StandardError, error:
+        transaction.rollback()
+        # fail here
+        # fail end
+        return error
+    # post processing here
+    # post processing end
+    return None
