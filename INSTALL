@@ -1,0 +1,48 @@
+h1. Установка
+
+h2. Установка в папку вне проекта (рекомендуется)
+
+Получаем приложение
+<pre>
+$ mkdir -p ~/projects/libs/
+$ cd ~/projects/libs/
+$ git clone ssh://verne.redsolution.ru/srv/projects/rs.dbschema.git rs.dbschema
+</pre>
+
+Добавляем папку приложения в python-овские пути проекта следующее:
+<pre>
+~/projects/libs/rs.dbschema
+</pre>
+
+Добавляем в файле settings.py проекта в переменную INSTALLED_APPS:
+<pre>
+'rs.dbschema'
+</pre>
+
+Добавляем в settings.py переменную REVSTORE_DIR:
+<pre>
+REVSTORE_DIR = join(dirname(abspath(__file__)), 'revstore')
+</pre>
+
+h2. Установка в сам проект
+
+Получаем приложение
+<pre>
+$ git clone ssh://verne.redsolution.ru/srv/projects/rs.dbschema.git /tmp/rs.dbschema
+$ cp /tmp/rs.dbschema/rs ~/projects/myproject/rs
+</pre>
+
+Добавляем в файле settings.py проекта в переменную INSTALLED_APPS:
+<pre>
+'rs.dbschema'
+</pre>
+
+При желании можно переопределить в settings.py переменную REVSTORE_DIR:
+<pre>
+REVSTORE_DIR = join(dirname(abspath(__file__)), 'revstore')
+</pre>
+
+h2. Что получили?
+
+После вызова manage.py dbschema init или manage.py dbschema add будет создана папка с именем 'revstore' в том же каталоге, где находится settings.py.
+В этой папке будут размещаться файлы ревизий (revision_*.py) и файл последовательность их сборки (sequence.py).
