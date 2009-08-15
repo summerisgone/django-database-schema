@@ -12,7 +12,7 @@ def upgrade():
         connection.cursor().execute('''
 -- upgrade query here
 
-%s
+{{ upgrade_sql|safe }}
 -- upgrade query end
 ''')
         transaction.commit()
@@ -34,7 +34,7 @@ def downgrade():
         connection.cursor().execute('''
 -- downgrade query here
 
-%s
+{{ downgrade_sql|safe }}
 -- downgrade query end
 ''')
         transaction.commit()

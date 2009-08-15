@@ -1,4 +1,3 @@
-*.bat
 *.orig
 *.pyc
 *.sh
@@ -6,5 +5,3 @@
 .project
 .pydevproject
 .settings
-commit.txt
-rs/revstore/*.py

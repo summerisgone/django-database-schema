@@ -4,20 +4,20 @@ import os
 import re
 import sys
 from datetime import datetime, timedelta
-from os.path import join, dirname, abspath, exists, split
 
 from django.core.management.sql import sql_all, sql_delete
 from django.core.management.color import no_style
 from django.conf import settings
 from django.db import models
 from django.utils.translation import ugettext_lazy as _
+from django.template.loader import render_to_string
 
-TEMPLATE_DIR = dirname(abspath(__file__))
-if hasattr(settings, 'REVSTORE_DIR'):
-    REVSTORE_DIR = settings.REVSTORE_DIR
-else:
-    REVSTORE_DIR = join(dirname(dirname(dirname(abspath(__file__)))), 'revstore')
-    
+REVSTORE_DIR = getattr(settings, 'REVSTORE_DIR', None)
+if REVSTORE_DIR is None:
+    module = __import__(os.environ['DJANGO_SETTINGS_MODULE'], {}, {}, [])
+    REVSTORE_DIR = os.path.join(os.path.dirname(os.path.abspath(module.__file__)), 'revstore')
+
+
 class Repository(models.Model):
     '''
         Class representing database schema repository
@@ -31,9 +31,9 @@ class Repository(models.Model):
 
     @classmethod
     def make_dir(cls):
-        if not exists(REVSTORE_DIR):
+        if not os.path.exists(REVSTORE_DIR):
             os.makedirs(REVSTORE_DIR)
-            open(join(REVSTORE_DIR, '__init__.py'), 'w')
+            open(os.path.join(REVSTORE_DIR, '__init__.py'), 'w').close()
     
     @classmethod
     def set_revno(cls, revno):
@@ -85,13 +85,11 @@ class Repository(models.Model):
         '''
             Update revision list
         '''
-        template_file = open(join(TEMPLATE_DIR, 'sequence.template'), 'r')
-        template = template_file.read()
+        
         cls.make_dir()
-        init_file = open(join(REVSTORE_DIR, 'sequence.py'), 'w')
-        init_file.write(template % (
-            '[\n%s]' % ',\n'.join([repr(revision)
-                for revision in revisions] + [''])))
+        name = os.path.join(REVSTORE_DIR, 'sequence.py')
+        file = open(name, 'w')
+        file.write(render_to_string('dbschema/sequence.py', {'revisions': revisions}))
 
     @classmethod
     def count(cls):
@@ -149,9 +147,6 @@ class Repository(models.Model):
         '''
             Adds template for next revision and adds it into __init__.py
         '''
-        template_file = open(join(TEMPLATE_DIR, 'revision.template'), 'r')
-        template = template_file.read().encode('utf-8')
-
         userid = 'unknown'
         for var in ['USER', 'USERNAME']:
             userid = os.environ.get(var, userid)
@@ -162,10 +157,13 @@ class Repository(models.Model):
                 time.strftime('%Y_%m_%d__%H_%M'), userid)
 
             cls.make_dir()
-            revision_name = join(REVSTORE_DIR, '%s.py' % revision)
-            if not exists(revision_name):
-                revision_file = open(revision_name, 'w')
-                revision_file.write(template % (upgrade_sql, downgrade_sql))
+            name = os.path.join(REVSTORE_DIR, '%s.py' % revision)
+            if not os.path.exists(name):
+                file = open(name, 'w')
+                file.write(render_to_string('dbschema/revision.py', {
+                    'upgrade_sql': upgrade_sql, 
+                    'downgrade_sql': downgrade_sql,
+                }))
                 break
             time = time + timedelta(minutes=1)
 
@@ -173,7 +171,7 @@ class Repository(models.Model):
         revisions.append(revision)
         cls.set_revisions(revisions)
 
-        print 'New revision was added, change it:\n%s' % revision_name
+        print 'New revision was added, change it:\n%s' % name
 
     @classmethod
     def init(cls, application_names):
