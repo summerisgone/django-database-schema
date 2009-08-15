@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from django.core.management.sql import sql_all, sql_delete
 from django.core.management.color import no_style
 from django.conf import settings
-from django.db import models
+from django.db import models, connection, transaction
 from django.utils.translation import ugettext_lazy as _
 from django.template.loader import render_to_string
 
@@ -16,7 +16,6 @@ REVSTORE_DIR = getattr(settings, 'REVSTORE_DIR', None)
 if REVSTORE_DIR is None:
     module = __import__(os.environ['DJANGO_SETTINGS_MODULE'], {}, {}, [])
     REVSTORE_DIR = os.path.join(os.path.dirname(os.path.abspath(module.__file__)), 'revstore')
-
 
 class Repository(models.Model):
     '''
@@ -36,16 +35,28 @@ class Repository(models.Model):
             open(os.path.join(REVSTORE_DIR, '__init__.py'), 'w').close()
     
     @classmethod
+    @transaction.commit_manually
+    def create_table(cls):
+        '''
+            Create tables for dbschema
+        '''
+        transaction.commit()
+        application = models.get_app('dbschema')
+        sql = ''.join(sql_all(application, no_style()))
+        try:
+            connection.cursor().execute(sql)
+            transaction.commit()
+        except StandardError, error:
+            # Tables already exists 
+            transaction.rollback()
+    
+    @classmethod
     def set_revno(cls, revno):
         '''
             Sets given revision number in database
         '''
-        try:
-            cls.objects.create(revno=revno)
-        except StandardError, error:
-            # table "dbschema_repository" does not exist
-            if revno != 0:
-                raise error
+        cls.create_table()
+        cls.objects.create(revno=revno)
 
     @classmethod
     def get_revno(cls):
