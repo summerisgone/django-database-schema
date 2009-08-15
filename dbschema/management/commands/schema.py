@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 
-from rs.dbschema.models import Repository
+from dbschema.models import Repository
 
 from django.core.management.base import BaseCommand, CommandError
 
 class Command(BaseCommand):
-    help = '''Usage manage.py dbschema [command]
+    help = '''Usage manage.py schema [command]
     Manage database schema revisions.
     
 Available commands:
