@@ -157,7 +157,7 @@ class Repository(models.Model):
                 next = current + 1
                 revision = revisions[current]
             else:
-                action = 'Dowgrade'
+                action = 'Downgrade'
                 next = current - 1
                 revision = revisions[next]
             print '%s: %d -> %d -' % (action, current, next),
