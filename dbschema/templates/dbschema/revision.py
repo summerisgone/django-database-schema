@@ -1,48 +1,16 @@
 # -*- coding: utf-8 -*-
 
-from django.conf import settings
-from django.db import connection, transaction
+from dbschema import BaseRevision
 
-@transaction.autocommit
-def upgrade():
-    # prepare here
-    # prepare end
-    transaction.commit()
-    try:
-        connection.cursor().execute('''
--- upgrade query here
-
+class Revision(BaseRevision):
+    upgrade_sql = '''
+-- upgrade sql begins
 {{ upgrade_sql|safe }}
--- upgrade query end
-''')
-        transaction.commit()
-    except StandardError, error:
-        transaction.rollback()
-        # fail here
-        # fail end
-        return error
-    # post processing here
-    # post processing end
-    return None
+-- upgrade sql ends
+'''
 
-@transaction.autocommit
-def downgrade():
-    # prepare here
-    # prepare end
-    transaction.commit()
-    try:
-        connection.cursor().execute('''
--- downgrade query here
-
+    downgrade_sql = '''
+-- downgrade sql begins
 {{ downgrade_sql|safe }}
--- downgrade query end
-''')
-        transaction.commit()
-    except StandardError, error:
-        transaction.rollback()
-        # fail here
-        # fail end
-        return error
-    # post processing here
-    # post processing end
-    return None
+-- downgrade sql ends
+'''

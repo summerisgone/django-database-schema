@@ -107,12 +107,26 @@ class Repository(models.Model):
         return len(cls.get_revisions())
 
     @classmethod
+    def get_revision_obj(cls, module):
+        # Here we are looking for a variable called 'Revision' in the revision module
+        # if it's found we assume that it's a new (class-based) revision format
+        #
+        # If it's not found, then we assume an old revision format and 
+        # construct a 'DummyRevision' object which calls upgrade() and
+        # downgrade() functions from the revision module.
+        if hasattr(module, 'Revision'):
+            revision = module.Revision()
+        else:
+            revision = DummyRevision(module.upgrade, module.downgrade)
+        return revision
+
+    @classmethod
     def execute(cls, revision, upgrade=True):
         insert = REVSTORE_DIR not in sys.path
         if insert:
             sys.path.insert(0, REVSTORE_DIR)
         try:
-            module = __import__(revision, globals(), locals(), ['upgrade', 'downgrade'])
+            module = __import__(revision, globals(), locals(), [])
         except ImportError:
             module = None
         if insert:
@@ -120,10 +134,11 @@ class Repository(models.Model):
         if module is None:
             print 'Can`t find revision'
             return False
+        revision = cls.get_revision_obj(module)
         if upgrade:
-            return module.upgrade()
+            return revision.upgrade()
         else:
-            return module.downgrade()
+            return revision.downgrade()
 
     @classmethod
     def apply(cls, revno):
