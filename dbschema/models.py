@@ -128,7 +128,9 @@ class Repository(models.Model):
         try:
             module = __import__(revision, globals(), locals(), [])
         except ImportError:
-            module = None
+            # We failed, no reason to hide the problem, while traceback can
+            # contain some insights about the problem
+            raise
         if insert:
             sys.path.remove(REVSTORE_DIR)
         if module is None:
